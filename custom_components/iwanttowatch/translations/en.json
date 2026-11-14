@@ -1,0 +1,50 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to iWantToWatch",
+        "description": "Enter your iWantToWatch server URL and API key.",
+        "data": {
+          "url": "Server URL",
+          "api_key": "API Key",
+          "username": "Username (optional)",
+          "limit": "Max movies per list",
+          "min_match": "Minimum match %",
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to iWantToWatch. Check the URL and network access.",
+      "invalid_auth": "Invalid API key.",
+      "unknown_user": "The specified username was not found on the server.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This iWantToWatch server and user are already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "iWantToWatch Options",
+        "data": {
+          "username": "Username (optional)",
+          "limit": "Max movies per list",
+          "min_match": "Minimum match %",
+          "scan_interval": "Update interval (minutes)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "recommendations": {
+        "name": "Recommendations"
+      },
+      "shortlist": {
+        "name": "Shortlist"
+      }
+    }
+  }
+}
