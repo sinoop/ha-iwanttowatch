@@ -36,6 +36,43 @@ class UnknownUserError(Exception):
     """Error to indicate the configured username was not found."""
 
 
+class ApiError(Exception):
+    """Error returned by iWantToWatch API."""
+
+
+async def _async_request(
+    hass: HomeAssistant,
+    method: str,
+    base_url: str,
+    path: str,
+    api_key: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    """Perform an authenticated request to iWantToWatch."""
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    session = async_get_clientsession(hass)
+
+    try:
+        async with asyncio.timeout(REQUEST_TIMEOUT):
+            async with session.request(method, url, headers=headers, params=params) as resp:
+                if resp.status in (401, 403):
+                    raise InvalidAuthError("Invalid API key or forbidden")
+                if resp.status == 404:
+                    raise UnknownUserError("Resource or user not found")
+                if resp.status == 204:
+                    return None
+                if resp.status >= 400:
+                    text = await resp.text()
+                    raise ApiError(f"HTTP {resp.status}: {text[:200]}")
+                return await resp.json()
+    except (InvalidAuthError, UnknownUserError, ApiError):
+        raise
+    except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+        raise CannotConnectError(f"Error communicating with iWantToWatch: {err}") from err
+
+
 async def async_fetch_feed(
     hass: HomeAssistant,
     base_url: str,
@@ -46,35 +83,21 @@ async def async_fetch_feed(
     min_match: int = DEFAULT_MIN_MATCH,
 ) -> dict[str, Any]:
     """Fetch the Home Assistant feed from iWantToWatch."""
-    url = f"{base_url.rstrip('/')}/api/v1/integrations/home-assistant"
     params: dict[str, Any] = {
         "limit": limit,
         "min_match": min_match,
     }
     if username:
         params["username"] = username
-
-    headers = {"Authorization": f"Bearer {api_key}"}
-    session = async_get_clientsession(hass)
-
-    try:
-        async with asyncio.timeout(REQUEST_TIMEOUT):
-            async with session.get(url, headers=headers, params=params) as resp:
-                if resp.status in (401, 403):
-                    raise InvalidAuthError("Invalid API key")
-                if resp.status == 404:
-                    raise UnknownUserError(f"Unknown user: {username}")
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise CannotConnectError(
-                        f"Unexpected HTTP {resp.status} from iWantToWatch: {text[:200]}"
-                    )
-                data: dict[str, Any] = await resp.json()
-                return data
-    except (InvalidAuthError, UnknownUserError, CannotConnectError):
-        raise
-    except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-        raise CannotConnectError(f"Error communicating with iWantToWatch: {err}") from err
+    data: dict[str, Any] = await _async_request(
+        hass,
+        "GET",
+        base_url,
+        "/api/v1/integrations/home-assistant",
+        api_key,
+        params=params,
+    )
+    return data
 
 
 class IWantToWatchCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -104,6 +127,12 @@ class IWantToWatchCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.limit = limit
         self.min_match = min_match
 
+    def _user_params(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        params = dict(extra or {})
+        if self.username:
+            params["username"] = self.username
+        return params
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch latest data from iWantToWatch."""
         try:
@@ -117,5 +146,71 @@ class IWantToWatchCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except InvalidAuthError as err:
             raise ConfigEntryAuthFailed("Invalid iWantToWatch API key") from err
-        except (UnknownUserError, CannotConnectError) as err:
+        except (UnknownUserError, CannotConnectError, ApiError) as err:
             raise UpdateFailed(str(err)) from err
+
+    async def async_get_panel_feed(
+        self, *, limit: int = 50, min_match: int = 0
+    ) -> dict[str, Any]:
+        """Fetch top matched movies and shortlist for the sidebar panel."""
+        return await async_fetch_feed(
+            self.hass,
+            self.base_url,
+            self.api_key,
+            username=self.username,
+            limit=limit,
+            min_match=min_match,
+        )
+
+    async def async_search(
+        self, query: str, *, year: int | None = None, limit: int = 25
+    ) -> list[dict[str, Any]]:
+        """Search TMDb via iWantToWatch."""
+        extra: dict[str, Any] = {"query": query, "limit": limit}
+        if year is not None:
+            extra["year"] = year
+        data: list[dict[str, Any]] = await _async_request(
+            self.hass,
+            "GET",
+            self.base_url,
+            "/api/v1/integrations/home-assistant/search",
+            self.api_key,
+            params=self._user_params(extra),
+        )
+        return data
+
+    async def async_set_shortlist(self, tmdb_id: int, *, add: bool) -> None:
+        """Add or remove a movie from the user's shortlist."""
+        await _async_request(
+            self.hass,
+            "PUT" if add else "DELETE",
+            self.base_url,
+            f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/shortlist",
+            self.api_key,
+            params=self._user_params(),
+        )
+        await self.async_request_refresh()
+
+    async def async_radarr_status(self, tmdb_id: int) -> dict[str, Any]:
+        """Get Radarr status for a movie."""
+        data: dict[str, Any] = await _async_request(
+            self.hass,
+            "GET",
+            self.base_url,
+            f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/radarr",
+            self.api_key,
+            params=self._user_params(),
+        )
+        return data
+
+    async def async_request_radarr(self, tmdb_id: int) -> dict[str, Any]:
+        """Queue a movie in Radarr."""
+        data: dict[str, Any] = await _async_request(
+            self.hass,
+            "POST",
+            self.base_url,
+            f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/radarr",
+            self.api_key,
+            params=self._user_params(),
+        )
+        return data
