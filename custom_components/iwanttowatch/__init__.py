@@ -39,7 +39,7 @@ from .coordinator import (
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 PANEL_URL_PATH = "iwanttowatch"
 PANEL_STATIC_URL = "/iwanttowatch_panel/iwanttowatch-panel.js"
-PANEL_VERSION = "0.2.0"
+PANEL_VERSION = "0.3.0"
 
 type IWantToWatchConfigEntry = ConfigEntry[IWantToWatchCoordinator]
 
@@ -164,6 +164,81 @@ async def ws_radarr_request(
         connection.send_error(msg["id"], "iwanttowatch_error", str(err))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/title_detail",
+        vol.Optional("entry_id"): str,
+        vol.Required("tmdb_id"): vol.Coerce(int),
+    }
+)
+@websocket_api.async_response
+async def ws_title_detail(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return full movie details."""
+    try:
+        _, coordinator = _get_coordinator(hass, msg.get("entry_id"))
+        detail = await coordinator.async_title_detail(msg["tmdb_id"])
+        connection.send_result(msg["id"], detail)
+    except (ValueError, InvalidAuthError, UnknownUserError, CannotConnectError, ApiError) as err:
+        connection.send_error(msg["id"], "iwanttowatch_error", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/reaction",
+        vol.Optional("entry_id"): str,
+        vol.Required("tmdb_id"): vol.Coerce(int),
+        vol.Optional("reaction"): vol.Any(None, vol.In(["loved", "liked", "disliked"])),
+        vol.Optional("watched", default=True): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_reaction(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set or clear a movie's watched/reaction status."""
+    try:
+        _, coordinator = _get_coordinator(hass, msg.get("entry_id"))
+        result = await coordinator.async_set_reaction(
+            msg["tmdb_id"],
+            reaction=msg.get("reaction"),
+            watched=msg["watched"],
+        )
+        connection.send_result(msg["id"], {"ok": True, "reaction": result})
+    except (ValueError, InvalidAuthError, UnknownUserError, CannotConnectError, ApiError) as err:
+        connection.send_error(msg["id"], "iwanttowatch_error", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ask",
+        vol.Optional("entry_id"): str,
+        vol.Required("text"): str,
+        vol.Optional("available_only", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_ask(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Run Ask AI natural-language movie search."""
+    try:
+        _, coordinator = _get_coordinator(hass, msg.get("entry_id"))
+        result = await coordinator.async_ask(
+            msg["text"], available_only=msg["available_only"]
+        )
+        connection.send_result(msg["id"], result)
+    except (ValueError, InvalidAuthError, UnknownUserError, CannotConnectError, ApiError) as err:
+        connection.send_error(msg["id"], "iwanttowatch_error", str(err))
+
+
 async def _async_register_panel_and_ws(hass: HomeAssistant) -> None:
     """Register static assets, sidebar panel, and WebSocket commands once."""
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -175,6 +250,9 @@ async def _async_register_panel_and_ws(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_search)
         websocket_api.async_register_command(hass, ws_shortlist)
         websocket_api.async_register_command(hass, ws_radarr_request)
+        websocket_api.async_register_command(hass, ws_title_detail)
+        websocket_api.async_register_command(hass, ws_reaction)
+        websocket_api.async_register_command(hass, ws_ask)
         domain_data["ws_registered"] = True
 
     if not domain_data.get("static_registered"):

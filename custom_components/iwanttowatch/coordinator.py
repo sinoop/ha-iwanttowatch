@@ -48,6 +48,7 @@ async def _async_request(
     api_key: str,
     *,
     params: dict[str, Any] | None = None,
+    json_body: dict[str, Any] | None = None,
 ) -> Any:
     """Perform an authenticated request to iWantToWatch."""
     url = f"{base_url.rstrip('/')}{path}"
@@ -56,7 +57,9 @@ async def _async_request(
 
     try:
         async with asyncio.timeout(REQUEST_TIMEOUT):
-            async with session.request(method, url, headers=headers, params=params) as resp:
+            async with session.request(
+                method, url, headers=headers, params=params, json=json_body
+            ) as resp:
                 if resp.status in (401, 403):
                     raise InvalidAuthError("Invalid API key or forbidden")
                 if resp.status == 404:
@@ -212,5 +215,58 @@ class IWantToWatchCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/radarr",
             self.api_key,
             params=self._user_params(),
+        )
+        return data
+
+    async def async_title_detail(self, tmdb_id: int) -> dict[str, Any]:
+        """Fetch full details for a movie."""
+        data: dict[str, Any] = await _async_request(
+            self.hass,
+            "GET",
+            self.base_url,
+            f"/api/v1/integrations/home-assistant/titles/{tmdb_id}",
+            self.api_key,
+            params=self._user_params(),
+        )
+        return data
+
+    async def async_set_reaction(
+        self, tmdb_id: int, *, reaction: str | None, watched: bool = True
+    ) -> dict[str, Any] | None:
+        """Set or clear a movie's watched/reaction status."""
+        if reaction is None and not watched:
+            await _async_request(
+                self.hass,
+                "DELETE",
+                self.base_url,
+                f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/reaction",
+                self.api_key,
+                params=self._user_params(),
+            )
+            await self.async_request_refresh()
+            return None
+
+        data: dict[str, Any] = await _async_request(
+            self.hass,
+            "PUT",
+            self.base_url,
+            f"/api/v1/integrations/home-assistant/titles/{tmdb_id}/reaction",
+            self.api_key,
+            params=self._user_params(),
+            json_body={"reaction": reaction, "watched": watched, "tags": []},
+        )
+        await self.async_request_refresh()
+        return data
+
+    async def async_ask(self, text: str, *, available_only: bool = False) -> dict[str, Any]:
+        """Run Ask AI natural-language search."""
+        data: dict[str, Any] = await _async_request(
+            self.hass,
+            "POST",
+            self.base_url,
+            "/api/v1/integrations/home-assistant/ask",
+            self.api_key,
+            params=self._user_params({"available_only": str(available_only).lower()}),
+            json_body={"text": text},
         )
         return data

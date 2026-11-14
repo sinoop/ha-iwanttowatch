@@ -8,10 +8,12 @@ Home Assistant custom integration for [iWantToWatch](https://github.com/sinoop/i
 
 - **UI Configuration (Config Flow & Options Flow)** — no YAML required.
 - **iWantToWatch Sidebar Tab** — built-in Home Assistant sidebar panel (mobile & desktop) with:
-  - **Top 50 Matches** with match %, IMDb rating, Jellyfin status, streaming providers, and overview
+  - **Top 50 Matches** with quick filters (*All*, *On Jellyfin*, *Streaming*, *Min Match %*)
   - **Shortlist** viewing and one-click add/remove
   - **Movie Search** (by title and optional year)
-  - **Request to Radarr** directly from any movie card
+  - **Ask AI** natural-language recommendations
+  - **Movie Details popup** (genres, runtime, cast/director, match reasons, Radarr & streaming status)
+  - **Mark Watched / Rate** (`Loved`, `Liked`, `Disliked`, `Watched`) and **Request to Radarr** directly from any card or modal
 - **Two Sensors per Account:**
   - `sensor.iwanttowatch_<user>_recommendations`: Count of high-match recommendations, with full movie details in `movies` and top-pick convenience attributes (`top_title`, `top_year`, `top_match`, `top_imdb_rating`, `top_poster_url`, `top_in_jellyfin`, `top_streaming_services`).
   - `sensor.iwanttowatch_<user>_shortlist`: Count of shortlisted movies with the same rich attributes.
